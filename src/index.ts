@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url';
 import http from 'http';
 import open from 'open';
 import os from 'os';
-import {createEmailMessage, createEmailWithNodemailer} from "./utl.js";
+import { createEmailMessage, createEmailWithNodemailer, makeEmailBodyLLMSafe } from "./utl.js";
 import { createLabel, updateLabel, deleteLabel, listLabels, findLabelByName, getOrCreateLabel, GmailLabel } from "./label-manager.js";
 import { createFilter, listFilters, getFilter, deleteFilter, filterTemplates, GmailFilterCriteria, GmailFilterAction } from "./filter-manager.js";
 
@@ -205,9 +205,7 @@ const SendEmailSchema = z.object({
 });
 
 const ReadEmailSchema = z.object({
-    messageId: z.string().describe("ID of the email message to retrieve"),
-		includeAttachments: z.boolean().optional().default(false).describe("Whether to include attachment information (default: true)"),
-		includeHtml: z.boolean().optional().default(false).describe("Whether to include HTML content (default: true)")
+    messageId: z.string().describe("ID of the email message to retrieve")
 });
 
 const SearchEmailsSchema = z.object({
@@ -609,71 +607,30 @@ async function main() {
 
                 case "read_email": {
                     const validatedArgs = ReadEmailSchema.parse(args);
-                    const response = await gmail.users.messages.get({
-                        userId: 'me',
-                        id: validatedArgs.messageId,
-                        format: 'full',
-                    });
+										const response = await gmail.users.messages.get({
+											userId: 'me',
+											id: validatedArgs.messageId,
+											format: 'full',
+											fields: 'id,threadId,payload(headers,body,parts)'
+										});
 
-                    const headers = response.data.payload?.headers || [];
-                    const subject = headers.find(h => h.name?.toLowerCase() === 'subject')?.value || '';
-                    const from = headers.find(h => h.name?.toLowerCase() === 'from')?.value || '';
-                    const to = headers.find(h => h.name?.toLowerCase() === 'to')?.value || '';
-                    const date = headers.find(h => h.name?.toLowerCase() === 'date')?.value || '';
-                    const threadId = response.data.threadId || '';
+										const headers = response.data.payload?.headers || [];
+										const subject = headers.find(h => h.name?.toLowerCase() === 'subject')?.value || '';
+										const from = headers.find(h => h.name?.toLowerCase() === 'from')?.value || '';
+										const to = headers.find(h => h.name?.toLowerCase() === 'to')?.value || '';
+										const date = headers.find(h => h.name?.toLowerCase() === 'date')?.value || '';
+										const threadId = response.data.threadId || '';
 
-                    // Extract email content using the recursive function
-                    const { text, html } = extractEmailContent(response.data.payload as GmailMessagePart || {});
+										const body = makeEmailBodyLLMSafe(response.data.payload, { maxChars: 5000 });
 
-									   // Use plain text content if available, otherwise use HTML content based on includeHtml flag
-                    let body = text || '';
-                    if (html && validatedArgs.includeHtml) {
-                        body = html;
-                    }
-
-                    // If we only have HTML content, add a note for the user
-										const contentTypeNote = !text && html && validatedArgs.includeHtml ?
-                        '[Note: This email is HTML-formatted. Plain text version not available.]\n\n' : '';
-
-										const attachments: EmailAttachment[] = [];
-										if (validatedArgs.includeAttachments) {
-												// Get attachment information
-												const processAttachmentParts = (part: GmailMessagePart, path: string = '') => {
-														if (part.body && part.body.attachmentId) {
-																const filename = part.filename || `attachment-${part.body.attachmentId}`;
-																attachments.push({
-																		id: part.body.attachmentId,
-																		filename: filename,
-																		mimeType: part.mimeType || 'application/octet-stream',
-																		size: part.body.size || 0
-																});
-														}
-
-														if (part.parts) {
-																part.parts.forEach((subpart: GmailMessagePart) =>
-																		processAttachmentParts(subpart, `${path}/parts`)
-																);
-														}
-												};
-
-												if (response.data.payload) {
-														processAttachmentParts(response.data.payload as GmailMessagePart);
-												}
-											}
-									
-											// Add attachment info to output if any are present
-											const attachmentInfo = attachments.length > 0 ?
-													`\n\nAttachments (${attachments.length}):\n` +
-													attachments.map(a => `- ${a.filename} (${a.mimeType}, ${Math.round(a.size/1024)} KB, ID: ${a.id})`).join('\n') : '';
-
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Thread ID: ${threadId}\nSubject: ${subject}\nFrom: ${from}\nTo: ${to}\nDate: ${date}\n\n${contentTypeNote}${body}${attachmentInfo}`,
-                            },
-                        ],
-                    };
+										return {
+											content: [
+												{
+													type: 'text',
+													text: `Thread ID: ${threadId}\nSubject: ${subject}\nFrom: ${from}\nTo: ${to}\nDate: ${date}\n\n${body}`,
+												},
+											],
+										};
                 }
 
                 case "search_emails": {

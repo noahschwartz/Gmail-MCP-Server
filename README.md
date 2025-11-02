@@ -248,33 +248,12 @@ Creates a draft email without sending it. **Also supports attachments**.
 ```
 
 ### 3. Read Email (`read_email`)
-Retrieves the content of a specific email by its ID. **Now shows enhanced attachment information**.
+Retrieves the content of a specific email by its ID.
 
 ```json
 {
   "messageId": "182ab45cd67ef",
-  "includeAttachments": false,
-  "includeHtml": true
 }
-```
-
-**Parameters:**
-- `messageId` (required): ID of the email message to retrieve
-- `includeAttachments` (optional): Whether to include attachment information (default: false)
-- `includeHtml` (optional): Whether to include HTML content (default: false)
-
-**Enhanced Response includes attachment details:**
-```
-Subject: Project Files
-From: sender@example.com
-To: recipient@example.com
-Date: Thu, 19 Jun 2025 10:30:00 -0400
-
-Email body content here...
-
-Attachments (2):
-- document.pdf (application/pdf, 245 KB, ID: ANGjdJ9fkTs-i3GCQo5o97f_itG...)
-- spreadsheet.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, 89 KB, ID: BWHkeL8gkUt-j4HDRp6o98g_juI...)
 ```
 
 ### 4. **Download Attachment (`download_attachment`)**

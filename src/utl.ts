@@ -147,3 +147,116 @@ export async function createEmailWithNodemailer(validatedArgs: any): Promise<str
     return rawMessage;
 }
 
+// Drop this somewhere in your MCP server code
+export function makeEmailBodyLLMSafe(payload: any, opts?: { maxChars?: number; }): string {
+  const MAX_CHARS = opts?.maxChars ?? 6000;
+
+  // ---------- helpers ----------
+  const decodeBody = (data?: string): string => {
+    if (!data) return '';
+    // Gmail uses URL-safe base64
+    const buff = Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    return buff.toString('utf8');
+  };
+
+  // Recursively extract text + html
+  const extract = (part: any): { text: string; html: string } => {
+    let text = '';
+    let html = '';
+
+    if (!part) return { text, html };
+
+    const mime = part.mimeType;
+
+    if (mime === 'text/plain' && part.body?.data) {
+      text += decodeBody(part.body.data);
+    } else if (mime === 'text/html' && part.body?.data) {
+      html += decodeBody(part.body.data);
+    }
+
+    if (Array.isArray(part.parts)) {
+      for (const p of part.parts) {
+        const child = extract(p);
+        text += child.text;
+        html += child.html;
+      }
+    }
+
+    return { text, html };
+  };
+
+  const htmlToText = (html: string): string => {
+    if (!html) return '';
+    let s = html
+      // remove style/script
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '');
+    // preserve some structure
+    s = s
+      .replace(/<\/(p|div|li|h[1-6]|br|tr)>/gi, '\n')
+      .replace(/<li>/gi, '- ');
+    // strip tags
+    s = s.replace(/<[^>]+>/g, ' ');
+    // collapse whitespace
+    s = s.replace(/\r?\n\s*\r?\n\s*/g, '\n\n');
+    s = s.replace(/[ \t]+/g, ' ');
+    return s.trim();
+  };
+
+  const stripQuoted = (s: string): string => {
+    const markers = [
+      /^On .* wrote:$/m,
+      /^From: .*$/m,
+      /^-----Original Message-----$/m,
+      /^> ?On .* wrote:$/m,
+    ];
+    for (const re of markers) {
+      const idx = s.search(re);
+      if (idx !== -1) {
+        return s.slice(0, idx).trim();
+      }
+    }
+    return s.trim();
+  };
+
+  const stripFooters = (s: string): string => {
+    const footerMarkers = [
+      /This e-mail and any attachments are confidential/i,
+      /This email and any attachments are confidential/i,
+      /Please consider the environment before printing this email/i,
+      /To unsubscribe/i,
+      /Unsubscribe here/i,
+    ];
+    for (const re of footerMarkers) {
+      const idx = s.search(re);
+      if (idx !== -1) {
+        return s.slice(0, idx).trim();
+      }
+    }
+    return s;
+  };
+
+  const truncate = (s: string): string => {
+    if (s.length <= MAX_CHARS) return s;
+    return s.slice(0, MAX_CHARS) + '\n\n[truncated for model]';
+  };
+  // ---------- end helpers ----------
+
+  // 1. extract text/html
+  const { text, html } = extract(payload || {});
+
+  // 2. prefer text, fallback to html→text
+  let body = (text && text.trim()) || '';
+  if (!body && html) {
+    body = htmlToText(html);
+  }
+
+  // 3. clean up email-y stuff
+  body = stripQuoted(body);
+  body = stripFooters(body);
+
+  // 4. final guard for LLM
+  body = truncate(body);
+
+  return body;
+}
