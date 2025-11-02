@@ -252,9 +252,16 @@ Retrieves the content of a specific email by its ID. **Now shows enhanced attach
 
 ```json
 {
-  "messageId": "182ab45cd67ef"
+  "messageId": "182ab45cd67ef",
+  "includeAttachments": false,
+  "includeHtml": true
 }
 ```
+
+**Parameters:**
+- `messageId` (required): ID of the email message to retrieve
+- `includeAttachments` (optional): Whether to include attachment information (default: false)
+- `includeHtml` (optional): Whether to include HTML content (default: false)
 
 **Enhanced Response includes attachment details:**
 ```

@@ -206,6 +206,8 @@ const SendEmailSchema = z.object({
 
 const ReadEmailSchema = z.object({
     messageId: z.string().describe("ID of the email message to retrieve"),
+		includeAttachments: z.boolean().optional().default(false).describe("Whether to include attachment information (default: true)"),
+		includeHtml: z.boolean().optional().default(false).describe("Whether to include HTML content (default: true)")
 });
 
 const SearchEmailsSchema = z.object({
@@ -623,42 +625,46 @@ async function main() {
                     // Extract email content using the recursive function
                     const { text, html } = extractEmailContent(response.data.payload as GmailMessagePart || {});
 
-                    // Use plain text content if available, otherwise use HTML content
-                    // (optionally, you could implement HTML-to-text conversion here)
-                    let body = text || html || '';
-
-                    // If we only have HTML content, add a note for the user
-                    const contentTypeNote = !text && html ?
-                        '[Note: This email is HTML-formatted. Plain text version not available.]\n\n' : '';
-
-                    // Get attachment information
-                    const attachments: EmailAttachment[] = [];
-                    const processAttachmentParts = (part: GmailMessagePart, path: string = '') => {
-                        if (part.body && part.body.attachmentId) {
-                            const filename = part.filename || `attachment-${part.body.attachmentId}`;
-                            attachments.push({
-                                id: part.body.attachmentId,
-                                filename: filename,
-                                mimeType: part.mimeType || 'application/octet-stream',
-                                size: part.body.size || 0
-                            });
-                        }
-
-                        if (part.parts) {
-                            part.parts.forEach((subpart: GmailMessagePart) =>
-                                processAttachmentParts(subpart, `${path}/parts`)
-                            );
-                        }
-                    };
-
-                    if (response.data.payload) {
-                        processAttachmentParts(response.data.payload as GmailMessagePart);
+									   // Use plain text content if available, otherwise use HTML content based on includeHtml flag
+                    let body = text || '';
+                    if (html && validatedArgs.includeHtml) {
+                        body = html;
                     }
 
-                    // Add attachment info to output if any are present
-                    const attachmentInfo = attachments.length > 0 ?
-                        `\n\nAttachments (${attachments.length}):\n` +
-                        attachments.map(a => `- ${a.filename} (${a.mimeType}, ${Math.round(a.size/1024)} KB, ID: ${a.id})`).join('\n') : '';
+                    // If we only have HTML content, add a note for the user
+										const contentTypeNote = !text && html && validatedArgs.includeHtml ?
+                        '[Note: This email is HTML-formatted. Plain text version not available.]\n\n' : '';
+
+										const attachments: EmailAttachment[] = [];
+										if (validatedArgs.includeAttachments) {
+												// Get attachment information
+												const processAttachmentParts = (part: GmailMessagePart, path: string = '') => {
+														if (part.body && part.body.attachmentId) {
+																const filename = part.filename || `attachment-${part.body.attachmentId}`;
+																attachments.push({
+																		id: part.body.attachmentId,
+																		filename: filename,
+																		mimeType: part.mimeType || 'application/octet-stream',
+																		size: part.body.size || 0
+																});
+														}
+
+														if (part.parts) {
+																part.parts.forEach((subpart: GmailMessagePart) =>
+																		processAttachmentParts(subpart, `${path}/parts`)
+																);
+														}
+												};
+
+												if (response.data.payload) {
+														processAttachmentParts(response.data.payload as GmailMessagePart);
+												}
+											}
+									
+											// Add attachment info to output if any are present
+											const attachmentInfo = attachments.length > 0 ?
+													`\n\nAttachments (${attachments.length}):\n` +
+													attachments.map(a => `- ${a.filename} (${a.mimeType}, ${Math.round(a.size/1024)} KB, ID: ${a.id})`).join('\n') : '';
 
                     return {
                         content: [
